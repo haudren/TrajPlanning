@@ -12,7 +12,6 @@
 //
 // You should have received a copy of the GNU Lesser General Public License
 // along with TrajPlanning.  If not, see <http://www.gnu.org/licenses/>.
-// boost
 
 // include
 // std
@@ -34,6 +33,7 @@
 
 // TrajPlanning
 #include "ObsPen.h"
+#include "SmoothnessMatrix.h"
 
 const Eigen::Vector3d gravity(0., 9.81, 0.);
 
@@ -88,9 +88,6 @@ std::tuple<rbd::MultiBody, rbd::MultiBodyConfig> makeZ12Arm(bool isFixed=true)
 BOOST_AUTO_TEST_CASE(ObsPenTest)
 {
   using namespace Eigen;
-  using namespace sva;
-  using namespace rbd;
-  namespace cst = boost::math::constants;
 
   std::vector<double> pen =
   {
@@ -162,4 +159,101 @@ BOOST_AUTO_TEST_CASE(ObsPenTest)
     BOOST_CHECK_SMALL(obsp.penality(points[i]) - penRes[i], 1e-4);
     BOOST_CHECK_SMALL((obsp.penalityGrad(points[i]) - penGradRes[i]).norm(), 1e-4);
   }
+}
+
+
+BOOST_AUTO_TEST_CASE(VelSmoothnessTest)
+{
+  using namespace Eigen;
+
+  MatrixXd resA(9,9);
+  VectorXd resB(9);
+  double resC;
+
+  resA << 10.0, 0.0, 0.0, -5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0,
+          -5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, -5.0, 0.0, 0.0,
+          0.0, -5.0, 0.0, 0.0, 10.0, 0.0, 0.0, -5.0, 0.0, 0.0, 0.0, -5.0, 0.0,
+          0.0, 10.0, 0.0, 0.0, -5.0, 0.0, 0.0, 0.0, -5.0, 0.0, 0.0, 10.0, 0.0,
+          0.0, -5.0, 0.0, 0.0, 0.0, -5.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+          0.0, -5.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -5.0, 0.0, 0.0, 10.0;
+  resB << 0.,   0.,   0.,   0.,   0.,   0., -10., -10., -10.;
+  resC = 15.;
+
+  VectorXd initQ(3);
+  initQ << 0., 0., 0.;
+  VectorXd finalQ(3);
+  finalQ << 1., 1., 1.;
+  auto abc = tpg::velocitySmoothness(3, initQ, finalQ, 5.);
+
+  BOOST_CHECK_SMALL((resA - MatrixXd(std::get<0>(abc))).norm(), 1e-4);
+  BOOST_CHECK_SMALL((resB - VectorXd(std::get<1>(abc))).norm(), 1e-4);
+  BOOST_CHECK_SMALL(std::abs(resC - std::get<2>(abc)), 1e-4);
+}
+
+
+BOOST_AUTO_TEST_CASE(AccSmoothnessTest)
+{
+  using namespace Eigen;
+
+  MatrixXd resA(12,12);
+  VectorXd resB(12);
+  double resC;
+
+  resA << 22.5, 0.0, 0.0, 0.0, -16.5, 0.0, 0.0, 0.0, 3.5, 0.0, 0.0, 0.0, 0.0,
+      22.5, 0.0, 0.0, 0.0, -16.5, 0.0, 0.0, 0.0, 3.5, 0.0, 0.0, 0.0, 0.0, 22.5,
+      0.0, 0.0, 0.0, -16.5, 0.0, 0.0, 0.0, 3.5, 0.0, 0.0, 0.0, 0.0, 22.5, 0.0,
+      0.0, 0.0, -16.5, 0.0, 0.0, 0.0, 3.5, -16.5, 0.0, 0.0, 0.0, 26.0, 0.0,
+      0.0, 0.0, -16.5, 0.0, 0.0, 0.0, 0.0, -16.5, 0.0, 0.0, 0.0, 26.0, 0.0, 0.0,
+      0.0, -16.5, 0.0, 0.0, 0.0, 0.0, -16.5, 0.0, 0.0, 0.0, 26.0, 0.0, 0.0, 0.0,
+      -16.5, 0.0, 0.0, 0.0, 0.0, -16.5, 0.0, 0.0, 0.0, 26.0, 0.0, 0.0, 0.0, -16.5,
+      3.5, 0.0, 0.0, 0.0, -16.5, 0.0, 0.0, 0.0, 22.5, 0.0, 0.0, 0.0, 0.0, 3.5, 0.0,
+      0.0, 0.0, -16.5, 0.0, 0.0, 0.0, 22.5, 0.0, 0.0, 0.0, 0.0, 3.5, 0.0, 0.0, 0.0,
+      -16.5, 0.0, 0.0, 0.0, 22.5, 0.0, 0.0, 0.0, 0.0, 3.5, 0.0, 0.0, 0.0, -16.5, 0.0,
+      0.0, 0.0, 22.5;
+  resB <<-57.0, -38.0, -19.0, 0.0, 35.0, 28.0, 14.0, 14.0, -38.0, -38.0, -19.0, -38.0;
+  resC = 162.;
+
+  VectorXd initQ(4);
+  initQ << 3.,2.,1.,0.;
+  VectorXd finalQ(4);
+  finalQ << 2.,2.,1.,2.;
+  auto abc = tpg::accelerationSmoothness(3, initQ, finalQ, 2.5, 3.5);
+
+  BOOST_CHECK_SMALL((resA - MatrixXd(std::get<0>(abc))).norm(), 1e-4);
+  BOOST_CHECK_SMALL((resB - VectorXd(std::get<1>(abc))).norm(), 1e-4);
+  BOOST_CHECK_SMALL(std::abs(resC - std::get<2>(abc)), 1e-4);
+}
+
+
+BOOST_AUTO_TEST_CASE(JerkSmoothnessTest)
+{
+  using namespace Eigen;
+
+  MatrixXd resA(12,12);
+  VectorXd resB(12);
+  double resC;
+
+  resA << 62.5, 0.0, 0.0, -64.5, 0.0, 0.0, 27.5, 0.0, 0.0, -4.0, 0.0, 0.0, 0.0,
+      62.5, 0.0, 0.0, -64.5, 0.0, 0.0, 27.5, 0.0, 0.0, -4.0, 0.0, 0.0, 0.0, 62.5,
+      0.0, 0.0, -64.5, 0.0, 0.0, 27.5, 0.0, 0.0, -4.0, -64.5, 0.0, 0.0, 102.0,
+      0.0, 0.0, -76.5, 0.0, 0.0, 27.5, 0.0, 0.0, 0.0, -64.5, 0.0, 0.0, 102.0, 0.0,
+      0.0, -76.5, 0.0, 0.0, 27.5, 0.0, 0.0, 0.0, -64.5, 0.0, 0.0, 102.0, 0.0, 0.0,
+      -76.5, 0.0, 0.0, 27.5, 27.5, 0.0, 0.0, -76.5, 0.0, 0.0, 102.0, 0.0, 0.0, -64.5,
+      0.0, 0.0, 0.0, 27.5, 0.0, 0.0, -76.5, 0.0, 0.0, 102.0, 0.0, 0.0, -64.5, 0.0, 0.0,
+      0.0, 27.5, 0.0, 0.0, -76.5, 0.0, 0.0, 102.0, 0.0, 0.0, -64.5, -4.0, 0.0, 0.0,
+      27.5, 0.0, 0.0, -64.5, 0.0, 0.0, 62.5, 0.0, 0.0, 0.0, -4.0, 0.0, 0.0, 27.5, 0.0,
+      0.0, -64.5, 0.0, 0.0, 62.5, 0.0, 0.0, 0.0, -4.0, 0.0, 0.0, 27.5, 0.0, 0.0,
+      -64.5, 0.0, 0.0, 62.5;
+  resB << -129.0, -86.0, -43.0, 53.0, 38.0, 23.0, 131.0, 77.0, 23.0, -215.0, -129.0, -43.0;
+  resC = 490;
+
+  VectorXd initQ(3);
+  initQ << 3.,2.,1.;
+  VectorXd finalQ(3);
+  finalQ << 5.,3.,1.;
+  auto abc = tpg::jerkSmoothness(4, initQ, finalQ, 2.5, 3.5, 4.);
+
+  BOOST_CHECK_SMALL((resA - MatrixXd(std::get<0>(abc))).norm(), 1e-4);
+  BOOST_CHECK_SMALL((resB - VectorXd(std::get<1>(abc))).norm(), 1e-4);
+  BOOST_CHECK_SMALL(std::abs(resC - std::get<2>(abc)), 1e-4);
 }

@@ -12,8 +12,8 @@
 //
 // You should have received a copy of the GNU Lesser General Public License
 // along with TrajPlanning.  If not, see <http://www.gnu.org/licenses/>.
-// associated header
 
+// associated header
 #include "ObsPen.h"
 
 // includes

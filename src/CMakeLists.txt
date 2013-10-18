@@ -1,5 +1,5 @@
-set(SOURCES ObsPen.cpp)
-set(HEADERS ObsPen.h)
+set(SOURCES ObsPen.cpp SmoothnessMatrix.cpp)
+set(HEADERS ObsPen.h SmoothnessMatrix.h)
 
 include_directories(${Boost_INCLUDE_DIRS})
 
