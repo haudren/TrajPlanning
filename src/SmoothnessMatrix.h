@@ -40,7 +40,7 @@ QuadTuple accelerationSmoothness(int nrWp,
                                  const Eigen::VectorXd& iQ, const Eigen::VectorXd& fQ,
                                  double velW, double accW);
 QuadTuple jerkSmoothness(int nrWp,
-                             const Eigen::VectorXd& iQ, const Eigen::VectorXd& fQ,
-                             double velW, double accW, double jerkW);
+                         const Eigen::VectorXd& iQ, const Eigen::VectorXd& fQ,
+                         double velW, double accW, double jerkW);
 
 } // tpg
