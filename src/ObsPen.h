@@ -37,8 +37,8 @@ public:
       const std::vector<double>& penalityGradY,
       const std::vector<double>& penalityGradZ);
 
-  double penality(const Eigen::Vector3d& pos);
-  Eigen::Vector3d penalityGrad(const Eigen::Vector3d& pos);
+  double penality(const Eigen::Vector3d& pos) const;
+  Eigen::Vector3d penalityGrad(const Eigen::Vector3d& pos) const;
 
 private:
   boost::multi_array<double, 3> pen_;

@@ -68,13 +68,12 @@ T interpolate3d(const boost::multi_array<T, 3>& array,
     return zero_value<T>::zero();
   }
 
-  // floor and ceil are fine since arrPoint is positive
   int x0 = int(std::floor(arrPoint.x()));
-  int x1 = int(std::ceil(arrPoint.x()));
+  int x1 = int(std::floor(arrPoint.x() + 1.));
   int y0 = int(std::floor(arrPoint.y()));
-  int y1 = int(std::ceil(arrPoint.y()));
+  int y1 = int(std::floor(arrPoint.y() + 1.));
   int z0 = int(std::floor(arrPoint.z()));
-  int z1 = int(std::ceil(arrPoint.z()));
+  int z1 = int(std::floor(arrPoint.z() + 1.));
 
   double xd = arrPoint.x() - x0;
   double xdm = x1 - arrPoint.x();
@@ -138,13 +137,13 @@ void ObsPen::setPen(const Eigen::Vector3d& start, const Eigen::Vector3d& scale,
 }
 
 
-double ObsPen::penality(const Eigen::Vector3d& pos)
+double ObsPen::penality(const Eigen::Vector3d& pos) const
 {
   return interpolate3d(pen_, pointToArray(pos, start_, scale_));
 }
 
 
-Eigen::Vector3d ObsPen::penalityGrad(const Eigen::Vector3d& pos)
+Eigen::Vector3d ObsPen::penalityGrad(const Eigen::Vector3d& pos) const
 {
   return interpolate3d(penGrad_, pointToArray(pos, start_, scale_));
 }
