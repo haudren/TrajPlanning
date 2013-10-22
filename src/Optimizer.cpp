@@ -119,6 +119,12 @@ std::vector<IterResult> Optimizer::iters() const
 }
 
 
+const ObsPen& Optimizer::obsPen() const
+{
+  return pen_;
+}
+
+
 void Optimizer::optimize(int nrIter, double learningRate, const Eigen::VectorXd& initPath)
 {
   iters_.clear();
@@ -139,7 +145,7 @@ void Optimizer::optimize(int nrIter, double learningRate, const Eigen::VectorXd&
     computeObsGrad();
     computeSpeedGrad();
 
-    path_ += learningRate*AInv_.solve(obsGrad_ + speedGrad_);
+    path_ -= learningRate*AInv_.solve(obsGrad_ + speedGrad_);
 
     iters_.push_back({obsCost_, speedCost_, smCost_});
   }

@@ -71,6 +71,7 @@ public:
   Eigen::VectorXd path() const;
   std::vector<rbd::MultiBodyConfig> pathMbc() const;
   std::vector<IterResult> iters() const;
+  const ObsPen& obsPen() const;
 
 private:
   struct WPData

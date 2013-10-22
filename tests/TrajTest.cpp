@@ -68,7 +68,7 @@ std::tuple<rbd::MultiBody, rbd::MultiBodyConfig> makeZ6Arm(bool isFixed=true)
     mbg.addJoint({Joint::RevZ, true, i, ss.str()});
   }
 
-  PTransformd to(Vector3d(0., 0.5, 0.));
+  PTransformd to(Vector3d(0., 1., 0.));
   PTransformd from(Vector3d(0., 0., 0.));
 
   mbg.linkBodies(0, from, 1, from, 0);
@@ -305,7 +305,23 @@ PenMap loadPenalityMap(const std::string& filename)
 }
 
 
-void writeResult(const std::string& filename, const tpg::Optimizer& opt)
+void writeFK(std::ofstream& outfile, const rbd::MultiBodyConfig& mbc)
+{
+  outfile << "[";
+  for(const sva::PTransformd& pt: mbc.bodyPosW)
+  {
+    outfile << "[";
+    outfile << pt.translation()[0] << "," << pt.translation()[1] << "," <<
+               pt.translation()[2];
+    outfile << "],";
+  }
+  outfile << "],";
+  outfile << std::endl;
+}
+
+
+void writeResult(const std::string& filename, const tpg::Optimizer& opt,
+                 const rbd::MultiBodyConfig& start, const rbd::MultiBodyConfig& end)
 {
   std::ofstream outfile(filename);
   BOOST_REQUIRE(outfile.is_open());
@@ -330,18 +346,24 @@ void writeResult(const std::string& filename, const tpg::Optimizer& opt)
   outfile << "]" << std::endl;
 
   outfile << "bodyPos=[";
+  writeFK(outfile, start);
   for(const rbd::MultiBodyConfig& mbc: opt.pathMbc())
   {
+    writeFK(outfile, mbc);
+  }
+  writeFK(outfile, end);
+  outfile << "]" << std::endl;
+
+  outfile << "penMap=[";
+  const tpg::ObsPen& op = opt.obsPen();
+  for(int y = 0; y < 10; ++y)
+  {
     outfile << "[";
-    for(const sva::PTransformd& pt: mbc.bodyPosW)
+    for(int x = 0; x < 10; ++x)
     {
-      outfile << "[";
-      outfile << pt.translation()[0] << "," << pt.translation()[1] << "," <<
-                 pt.translation()[2];
-      outfile << "],";
+      outfile << op.penality(Eigen::Vector3d(x, y, 0.)) << ",";
     }
-    outfile << "],";
-    outfile << std::endl;
+    outfile << "]," << std::endl;
   }
   outfile << "]" << std::endl;
 }
@@ -366,7 +388,7 @@ Eigen::VectorXd basicInterp(const rbd::MultiBody& mb,
 }
 
 
-BOOST_AUTO_TEST_CASE(FreeTraj)
+void testBasicTrajectory(const std::string& map, const std::string& out)
 {
   using namespace Eigen;
   using namespace sva;
@@ -378,10 +400,10 @@ BOOST_AUTO_TEST_CASE(FreeTraj)
 
   std::tie(mb, mbcInit) = makeZ6Arm();
   mbcWork = mbcInit;
-  PenMap penMap = loadPenalityMap("./empty1.map");
+  PenMap penMap = loadPenalityMap(map);
 
   tpg::ObsPen obsPen;
-  obsPen.setPen(Vector3d(0., 0., 0.), penMap.scale,
+  obsPen.setPen(Vector3d(0., 0., -5.), penMap.scale,
                 penMap.sizeX, penMap.sizeY, penMap.sizeZ,
                 penMap.penality, penMap.penalityGradX, penMap.penalityGradY,
                 penMap.penalityGradZ);
@@ -392,11 +414,13 @@ BOOST_AUTO_TEST_CASE(FreeTraj)
   conf.pen = obsPen;
   conf.mb = mb;
   conf.start = mbcWork;
+  rbd::forwardKinematics(mb, conf.start);
   mbcWork.q[1][0] = -cst::pi<double>()/2.;
   conf.end = mbcWork;
+  rbd::forwardKinematics(mb, conf.end);
   for(int i = 0; i < 6; ++i)
   {
-    conf.collisionSpheres.push_back({i + 1, 0.5, Vector3d(0., 0.5, 0.)});
+    conf.collisionSpheres.push_back({i + 1, 0., Vector3d(0., 0.5, 0.)});
   }
   conf.velWeight = 1.;
   conf.accWeight = 0.;
@@ -405,6 +429,20 @@ BOOST_AUTO_TEST_CASE(FreeTraj)
   opt.init(conf);
 
   opt.optimize(100, 0.01, basicInterp(mb, conf.start, conf.end, conf.nrWp));
-  writeResult("freetraj.py", opt);
+  writeResult(out, opt, conf.start, conf.end);
+}
+
+
+BOOST_AUTO_TEST_CASE(FreeTraj)
+{
+  testBasicTrajectory("empty1.map", "freetraj.py");
+}
+
+
+BOOST_AUTO_TEST_CASE(ObsTraj)
+{
+  testBasicTrajectory("obs1.map", "obs1traj.py");
+  testBasicTrajectory("obs2.map", "obs2traj.py");
+  testBasicTrajectory("obs3.map", "obs3traj.py");
 }
 

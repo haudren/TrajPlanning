@@ -14,11 +14,12 @@ if __name__ == '__main__':
   smCost = []
   speedCost = []
   bodyPos = []
+  penMap = []
   execfile(file)
 
   fig = plt.figure()
   ax = fig.add_subplot(111)
-
+  ax.imshow(np.array(penMap), interpolation='none', origin=[0,0])
   line, = ax.plot([], [], 'o-', lw=2)
   time_text = ax.text(0.05, 0.9, '', transform=ax.transAxes)
 
@@ -32,7 +33,8 @@ if __name__ == '__main__':
 
   fig = plt.figure()
   ax = fig.add_subplot(111)
-  ax.plot(obsCost)
-  ax.plot(smCost)
-  ax.plot(speedCost)
+  obsPlot, = ax.plot(obsCost)
+  smPlot, = ax.plot(smCost)
+  speedPlot, = ax.plot(speedCost)
+  ax.legend([obsPlot, smPlot, speedPlot], ['obs', 'sm', 'speed'])
   plt.show()
