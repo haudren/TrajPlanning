@@ -54,10 +54,12 @@ void Optimizer::init(const OptimizerConfig& oc)
   for(const rbd::Body& b: mb_.bodies())
   {
     wpdata.jacVel.emplace_back(mb_, b.id());
+    wpdata.jacVelMat.emplace_back(3, mb_.nrDof());
   }
   for(const Sphere& s: oc.collisionSpheres)
   {
     wpdata.jacSphere.emplace_back(mb_, s.bodyId, s.position);
+    wpdata.jacSphereMat.emplace_back(3, mb_.nrDof());
   }
   wpData_.resize(oc.nrWp, wpdata);
 
@@ -66,6 +68,8 @@ void Optimizer::init(const OptimizerConfig& oc)
   rbd::MultiBodyConfig mbcStartEnd(oc.start);
   rbd::forwardKinematics(mb_, mbcStartEnd);
   startPoses_ = mbcStartEnd.bodyPosW;
+  startBodyVel_.resize(mb_.nrBodies());
+  startBodyVelNorm_.resize(mb_.nrBodies());
   // end
   mbcStartEnd = oc.end;
   rbd::forwardKinematics(mb_, mbcStartEnd);
@@ -83,18 +87,61 @@ void Optimizer::init(const OptimizerConfig& oc)
 
   // optim
   path_.resize(mb_.nrParams()*oc.nrWp);
-  obsGrad_.resize(path_.cols());
-  speedGrad_.resize(path_.cols());
+  obsGrad_.resize(path_.rows());
+  speedGrad_.resize(path_.rows());
+}
+
+
+Eigen::VectorXd Optimizer::path() const
+{
+  return path_;
+}
+
+
+std::vector<rbd::MultiBodyConfig> Optimizer::pathMbc() const
+{
+  std::vector<rbd::MultiBodyConfig> ret(wpData_.size());
+  for(int wp = 0; wp < int(wpData_.size()); ++wp)
+  {
+    const WPData& data = wpData_[wp];
+    ret[wp] = data.mbc;
+    rbd::vectorToParam(path_.segment(wp*mb_.nrParams(), mb_.nrParams()),
+                       ret[wp].q);
+    rbd::forwardKinematics(mb_, ret[wp]);
+  }
+  return std::move(ret);
+}
+
+
+std::vector<IterResult> Optimizer::iters() const
+{
+  return iters_;
 }
 
 
 void Optimizer::optimize(int nrIter, double learningRate, const Eigen::VectorXd& initPath)
 {
+  iters_.clear();
+  iters_.reserve(nrIter);
+
+  path_ = initPath;
+
   for(int iter = 0; iter < nrIter; ++iter)
   {
     computeFK();
     computeVel();
     computeJac();
+
+    computeObsCost();
+    computeSpeedCost();
+    computeSmCost();
+
+    computeObsGrad();
+    computeSpeedGrad();
+
+    path_ += learningRate*AInv_.solve(obsGrad_ + speedGrad_);
+
+    iters_.push_back({obsCost_, speedCost_, smCost_});
   }
 }
 
@@ -104,7 +151,7 @@ void Optimizer::computeFK()
   for(int wp = 0; wp < int(wpData_.size()); ++wp)
   {
     WPData& data = wpData_[wp];
-    rbd::vectorToParam(path_.segment(wp*mb_.nrParams(), (wp+1)*mb_.nrParams()),
+    rbd::vectorToParam(path_.segment(wp*mb_.nrParams(), mb_.nrParams()),
                        data.mbc.q);
     rbd::forwardKinematics(mb_, data.mbc);
   }
@@ -113,22 +160,29 @@ void Optimizer::computeFK()
 
 void Optimizer::computeVel()
 {
-  for(int wp = 0; wp < int(wpData_.size() - 1); ++wp)
+  // start
+  computeVel(startBodyVel_, startBodyVelNorm_, startPoses_, wpData_.front().mbc.bodyPosW);
+  for(std::size_t wp = 0; wp < wpData_.size() - 1; ++wp)
   {
     WPData& data = wpData_[wp];
     WPData& dataNext = wpData_[wp + 1];
-    computeVel(data, dataNext.mbc.bodyPosW);
+    computeVel(data.bodyVel, data.bodyVelNorm, data.mbc.bodyPosW, dataNext.mbc.bodyPosW);
   }
-  computeVel(wpData_.back(), endPoses_);
+  // last wp
+  computeVel(wpData_.back().bodyVel, wpData_.back().bodyVelNorm,
+             wpData_.back().mbc.bodyPosW, endPoses_);
 }
 
 
-void Optimizer::computeVel(WPData& data, const std::vector<sva::PTransformd>& nextPoses)
+void Optimizer::computeVel(std::vector<Eigen::Vector3d>& bodyVel,
+                           Eigen::ArrayXd& bodyVelNorm,
+                           const std::vector<sva::PTransformd>& poses,
+                           const std::vector<sva::PTransformd>& nextPoses)
 {
-  for(std::size_t bi = 0; bi < data.mbc.bodyPosW.size(); ++bi)
+  for(std::size_t bi = 0; bi < poses.size(); ++bi)
   {
-    data.bodyVel[bi] = nextPoses[bi].translation() - data.mbc.bodyPosW[bi].translation();
-    data.bodyVelNorm[bi] = data.bodyVel[bi].norm();
+    bodyVel[bi] = nextPoses[bi].translation() - poses[bi].translation();
+    bodyVelNorm[bi] = std::sqrt(bodyVel[bi].squaredNorm() + 1);
   }
 }
 
@@ -140,11 +194,13 @@ void Optimizer::computeJac()
     WPData& data = wpData_[wp];
     for(std::size_t ji = 0; ji < data.jacVel.size(); ++ji)
     {
-      data.jacVel[ji].jacobian(mb_, data.mbc);
+      const Eigen::MatrixXd& jac = data.jacVel[ji].jacobian(mb_, data.mbc);
+      data.jacVel[ji].fullJacobian(mb_, jac.block(3, 0, 3, jac.cols()), data.jacVelMat[ji]);
     }
     for(std::size_t js = 0; js < data.jacSphere.size(); ++js)
     {
-      data.jacSphere[js].jacobian(mb_, data.mbc);
+      const Eigen::MatrixXd& jac = data.jacSphere[js].jacobian(mb_, data.mbc);
+      data.jacSphere[js].fullJacobian(mb_, jac.block(3, 0, 3, jac.cols()), data.jacSphereMat[js]);
     }
   }
 }
@@ -158,25 +214,87 @@ void Optimizer::computeSmCost()
 
 void Optimizer::computeSpeedCost()
 {
-
+  speedCost_ = startBodyVelNorm_.sum();
+  for(const WPData& wp: wpData_)
+  {
+    speedCost_ += wp.bodyVelNorm.sum();
+  }
 }
 
 
 void Optimizer::computeObsCost()
 {
-
+  obsCost_ = 0.;
+  for(const WPData& wp: wpData_)
+  {
+    for(const SphereData& sd: collisionSphere_)
+    {
+      obsCost_ += pen_.penality((sd.position*wp.mbc.bodyPosW[sd.bodyIndex]).translation()) - sd.radius;
+    }
+  }
 }
 
 
 void Optimizer::computeSpeedGrad()
 {
+  speedGrad_.setZero();
+  // start
+  {
+    int startq0 = 0;
+    const WPData& wp0 = wpData_.front();
+    for(std::size_t j = 0; j < wp0.jacVelMat.size(); ++j)
+    {
+      Eigen::Vector3d velN = startBodyVel_[j]/startBodyVelNorm_[j];
+      speedGrad_.segment(startq0, mb_.nrParams()) += wp0.jacVelMat[j].transpose()*velN;
+    }
+  }
 
+  {
+    int startqi = 0;
+    int startqip1 =  mb_.nrParams();
+    for(std::size_t i = 0; i < wpData_.size() - 1; ++i)
+    {
+      const WPData& wpi = wpData_[i];
+      const WPData& wpip1 = wpData_[i + 1];
+      for(std::size_t j = 0; j < wpi.jacVelMat.size(); ++j)
+      {
+        Eigen::Vector3d velN = wpi.bodyVel[j]/wpi.bodyVelNorm[j];
+        speedGrad_.segment(startqi, mb_.nrParams()) -= wpi.jacVelMat[j].transpose()*velN;
+        speedGrad_.segment(startqip1, mb_.nrParams()) += wpip1.jacVelMat[j].transpose()*velN;
+      }
+      startqi += mb_.nrParams();
+      startqip1 += mb_.nrParams();
+    }
+  }
+
+  // last wp
+  {
+    int startql = int(mb_.nrParams()*(wpData_.size() - 1));
+    const WPData& wpl = wpData_.back();
+    for(std::size_t j = 0; j < wpl.jacVelMat.size(); ++j)
+    {
+      Eigen::Vector3d velN = wpl.bodyVel[j]/wpl.bodyVelNorm[j];
+      speedGrad_.segment(startql, mb_.nrParams()) -= wpl.jacVelMat[j].transpose()*velN;
+    }
+  }
 }
 
 
 void Optimizer::computeObsGrad()
 {
-
+  obsGrad_.setZero();
+  int start = 0;
+  for(const WPData& wp: wpData_)
+  {
+    for(std::size_t i = 0; i < wp.jacSphere.size(); ++i)
+    {
+      const SphereData& sd = collisionSphere_[i];
+      Eigen::Vector3d position = (sd.position*wp.mbc.bodyPosW[sd.bodyIndex]).translation();
+      obsGrad_.segment(start, mb_.nrParams()) +=
+          wp.jacSphereMat[i].transpose()*pen_.penalityGrad(position);
+    }
+    start += mb_.nrParams();
+  }
 }
 
 } // tpg

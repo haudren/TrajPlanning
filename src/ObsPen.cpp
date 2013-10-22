@@ -95,6 +95,18 @@ T interpolate3d(const boost::multi_array<T, 3>& array,
 }
 
 
+ObsPen& ObsPen::operator=(const ObsPen& op)
+{
+  pen_.resize(boost::extents[op.pen_.shape()[0]][op.pen_.shape()[1]][op.pen_.shape()[2]]);
+  pen_ = op.pen_;
+  penGrad_.resize(boost::extents[op.penGrad_.shape()[0]][op.penGrad_.shape()[1]][op.penGrad_.shape()[2]]);
+  penGrad_ = op.penGrad_;
+  start_ = op.start_;
+  scale_ = op.scale_;
+  return *this;
+}
+
+
 void ObsPen::setPen(const Eigen::Vector3d& start, const Eigen::Vector3d& scale,
     int sizeX, int sizeY, int sizeZ,
     const std::vector<double>& penality,

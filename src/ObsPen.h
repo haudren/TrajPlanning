@@ -28,6 +28,8 @@ namespace tpg
 class ObsPen
 {
 public:
+  ObsPen& operator=(const ObsPen& op);
+
   void setPen(const Eigen::Vector3d& start, const Eigen::Vector3d& scale,
       int sizeX, int sizeY, int sizeZ,
       const std::vector<double>& penality,

@@ -33,13 +33,14 @@
 
 // TrajPlanning
 #include "ObsPen.h"
+#include "Optimizer.h"
 #include "SmoothnessMatrix.h"
 
 const Eigen::Vector3d gravity(0., 9.81, 0.);
 
 
 /// @return An simple Z*6 arm with Y as up axis.
-std::tuple<rbd::MultiBody, rbd::MultiBodyConfig> makeZ12Arm(bool isFixed=true)
+std::tuple<rbd::MultiBody, rbd::MultiBodyConfig> makeZ6Arm(bool isFixed=true)
 {
   using namespace Eigen;
   using namespace sva;
@@ -257,3 +258,153 @@ BOOST_AUTO_TEST_CASE(JerkSmoothnessTest)
   BOOST_CHECK_SMALL((resB - VectorXd(std::get<1>(abc))).norm(), 1e-4);
   BOOST_CHECK_SMALL(std::abs(resC - std::get<2>(abc)), 1e-4);
 }
+
+
+struct PenMap
+{
+  int sizeX, sizeY, sizeZ;
+  Eigen::Vector3d scale;
+  std::vector<double> penality;
+  std::vector<double> penalityGradX;
+  std::vector<double> penalityGradY;
+  std::vector<double> penalityGradZ;
+};
+
+
+PenMap loadPenalityMap(const std::string& filename)
+{
+  std::ifstream mapfile(filename);
+  BOOST_REQUIRE(mapfile.is_open());
+
+  PenMap map;
+  mapfile >> map.sizeX >> map.sizeY >> map.sizeZ;
+  mapfile >> map.scale.x() >> map.scale.y() >> map.scale.z();
+  map.penality.resize(map.sizeX*map.sizeY*map.sizeZ);
+  map.penalityGradX.resize(map.penality.size());
+  map.penalityGradY.resize(map.penality.size());
+  map.penalityGradZ.resize(map.penality.size());
+
+  for(std::size_t i = 0; i < map.penality.size(); ++i)
+  {
+    mapfile >> map.penality[i];
+  }
+  for(std::size_t i = 0; i < map.penality.size(); ++i)
+  {
+    mapfile >> map.penalityGradX[i];
+  }
+  for(std::size_t i = 0; i < map.penality.size(); ++i)
+  {
+    mapfile >> map.penalityGradY[i];
+  }
+  for(std::size_t i = 0; i < map.penality.size(); ++i)
+  {
+    mapfile >> map.penalityGradZ[i];
+  }
+
+  return std::move(map);
+}
+
+
+void writeResult(const std::string& filename, const tpg::Optimizer& opt)
+{
+  std::ofstream outfile(filename);
+  BOOST_REQUIRE(outfile.is_open());
+
+  outfile << "obsCost=[";
+  for(const tpg::IterResult& it: opt.iters())
+  {
+    outfile << it.obsCost << ",";
+  }
+  outfile << "]" << std::endl;
+  outfile << "smCost=[";
+  for(const tpg::IterResult& it: opt.iters())
+  {
+    outfile << it.smCost << ",";
+  }
+  outfile << "]" << std::endl;
+  outfile << "speedCost=[";
+  for(const tpg::IterResult& it: opt.iters())
+  {
+    outfile << it.speedCost << ",";
+  }
+  outfile << "]" << std::endl;
+
+  outfile << "bodyPos=[";
+  for(const rbd::MultiBodyConfig& mbc: opt.pathMbc())
+  {
+    outfile << "[";
+    for(const sva::PTransformd& pt: mbc.bodyPosW)
+    {
+      outfile << "[";
+      outfile << pt.translation()[0] << "," << pt.translation()[1] << "," <<
+                 pt.translation()[2];
+      outfile << "],";
+    }
+    outfile << "],";
+    outfile << std::endl;
+  }
+  outfile << "]" << std::endl;
+}
+
+
+Eigen::VectorXd basicInterp(const rbd::MultiBody& mb,
+                            const rbd::MultiBodyConfig& mbcStart,
+                            const rbd::MultiBodyConfig& mbcEnd,
+                            int nrWp)
+{
+  Eigen::VectorXd ret(mb.nrParams()*nrWp);
+  Eigen::VectorXd start = rbd::paramToVector(mb, mbcStart.q);
+  Eigen::VectorXd end = rbd::paramToVector(mb, mbcEnd.q);
+
+  for(int i = 0; i < nrWp; ++i)
+  {
+    ret.segment(i*mb.nrParams(), mb.nrParams()) =
+        double(i + 1)/(nrWp + 1)*(end - start);
+  }
+
+  return ret;
+}
+
+
+BOOST_AUTO_TEST_CASE(FreeTraj)
+{
+  using namespace Eigen;
+  using namespace sva;
+  using namespace rbd;
+  namespace cst = boost::math::constants;
+
+  MultiBody mb;
+  MultiBodyConfig mbcInit, mbcWork;
+
+  std::tie(mb, mbcInit) = makeZ6Arm();
+  mbcWork = mbcInit;
+  PenMap penMap = loadPenalityMap("./empty1.map");
+
+  tpg::ObsPen obsPen;
+  obsPen.setPen(Vector3d(0., 0., 0.), penMap.scale,
+                penMap.sizeX, penMap.sizeY, penMap.sizeZ,
+                penMap.penality, penMap.penalityGradX, penMap.penalityGradY,
+                penMap.penalityGradZ);
+
+  tpg::Optimizer opt;
+  tpg::OptimizerConfig conf;
+  conf.nrWp = 30;
+  conf.pen = obsPen;
+  conf.mb = mb;
+  conf.start = mbcWork;
+  mbcWork.q[1][0] = -cst::pi<double>()/2.;
+  conf.end = mbcWork;
+  for(int i = 0; i < 6; ++i)
+  {
+    conf.collisionSpheres.push_back({i + 1, 0.5, Vector3d(0., 0.5, 0.)});
+  }
+  conf.velWeight = 1.;
+  conf.accWeight = 0.;
+  conf.jerkWeight = 0.;
+
+  opt.init(conf);
+
+  opt.optimize(100, 0.01, basicInterp(mb, conf.start, conf.end, conf.nrWp));
+  writeResult("freetraj.py", opt);
+}
+

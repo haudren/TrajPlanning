@@ -12,3 +12,4 @@ PKG_CONFIG_USE_DEPENDENCY(TrajTest SpaceVecAlg)
 PKG_CONFIG_USE_DEPENDENCY(TrajTest RBDyn)
 add_test(TrajTestUnit TrajTest)
 
+file(COPY "empty1.map" DESTINATION ${CMAKE_CURRENT_BINARY_DIR})

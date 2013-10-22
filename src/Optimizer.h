@@ -56,20 +56,32 @@ struct OptimizerConfig
 };
 
 
+struct IterResult
+{
+  double obsCost, speedCost, smCost;
+};
+
+
 class Optimizer
 {
 public:
   void init(const OptimizerConfig& oc);
   void optimize(int nrIter, double learningRate, const Eigen::VectorXd& initPath);
 
+  Eigen::VectorXd path() const;
+  std::vector<rbd::MultiBodyConfig> pathMbc() const;
+  std::vector<IterResult> iters() const;
+
 private:
   struct WPData
   {
     rbd::MultiBodyConfig mbc;
     std::vector<Eigen::Vector3d> bodyVel;
-    std::vector<double> bodyVelNorm;
+    Eigen::ArrayXd bodyVelNorm;
     std::vector<rbd::Jacobian> jacVel;
     std::vector<rbd::Jacobian> jacSphere;
+    std::vector<Eigen::MatrixXd> jacVelMat;
+    std::vector<Eigen::MatrixXd> jacSphereMat;
   };
 
   struct SphereData
@@ -82,7 +94,9 @@ private:
 private:
   void computeFK();
   void computeVel();
-  void computeVel(WPData& data, const std::vector<sva::PTransformd>& nextPoses);
+  void computeVel(std::vector<Eigen::Vector3d>& bodyVel, Eigen::ArrayXd& bodyVelNorm,
+                  const std::vector<sva::PTransformd>& poses,
+                  const std::vector<sva::PTransformd>& nextPoses);
   void computeJac();
 
   void computeSmCost();
@@ -98,7 +112,11 @@ private:
   ObsPen pen_;
   std::vector<SphereData> collisionSphere_;
   std::vector<WPData> wpData_;
+
+  // start - end specific data
   std::vector<sva::PTransformd> startPoses_, endPoses_;
+  std::vector<Eigen::Vector3d> startBodyVel_;
+  Eigen::ArrayXd startBodyVelNorm_;
 
   // optim
   Eigen::VectorXd path_;
@@ -110,6 +128,9 @@ private:
   Eigen::SparseVector<double> b_;
   double c_;
   Eigen::SimplicialLDLT<Eigen::SparseMatrix<double> > AInv_;
+
+  // result
+  std::vector<IterResult> iters_;
 };
 
 } // tpg
